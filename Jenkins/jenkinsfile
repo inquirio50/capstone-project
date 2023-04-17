@@ -1,0 +1,71 @@
+pipeline {
+  agent any
+  
+  environment {
+    K8S_NAMESPACE = 'default'
+    DOCKER_REGISTRY = 'your.docker.registry.com'
+    DOCKER_IMAGE_NAME = 'shopping-cart-app'
+    DOCKER_IMAGE_TAG = 'latest'
+    K8S_DEPLOYMENT_NAME = 'shopping-cart-app-deployment'
+    K8S_SERVICE_NAME = 'shopping-cart-app-service'
+    K8S_INGRESS_NAME = 'shopping-cart-app-ingress'
+    K8S_PROMETHEUS_NAMESPACE = 'prometheus'
+    K8S_GRAFANA_NAMESPACE = 'grafana'
+    K8S_NGINX_NAMESPACE = 'nginx'
+  }
+  
+  stages {
+    stage('Build and Push Docker Image') {
+      steps {
+        script {
+          sh "docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} ."
+          withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+            sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOCKER_REGISTRY}"
+          }
+          sh "docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
+        }
+      }
+    }
+    
+    stage('Deploy to Kubernetes Cluster') {
+      steps {
+        script {
+          def kubectl = tool 'kubectl'
+          
+          sh "${kubectl} apply -f kubernetes/deployment.yaml --namespace ${K8S_NAMESPACE}"
+          sh "${kubectl} apply -f kubernetes/service.yaml --namespace ${K8S_NAMESPACE}"
+          sh "${kubectl} apply -f kubernetes/ingress.yaml --namespace ${K8S_NAMESPACE}"
+        }
+      }
+    }
+    
+    stage('Set up Nginx Ingress Controller') {
+      steps {
+        script {
+          def helm = tool 'helm'
+          
+          sh "${helm} repo add ingress-nginx https://kubernetes.github.io/ingress-nginx"
+          sh "${helm} repo update"
+          sh "${helm} install nginx ingress-nginx/ingress-nginx --namespace ${K8S_NGINX_NAMESPACE}"
+        }
+      }
+    }
+    
+    stage('Set up Prometheus and Grafana Monitoring Stack') {
+      steps {
+        script {
+          def kubectl = tool 'kubectl'
+          def helm = tool 'helm'
+          
+          sh "${kubectl} create namespace ${K8S_PROMETHEUS_NAMESPACE}"
+          sh "${helm} repo add prometheus-community https://prometheus-community.github.io/helm-charts"
+          sh "${helm} repo update"
+          sh "${helm} install prometheus prometheus-community/prometheus --namespace ${K8S_PROMETHEUS_NAMESPACE}"
+          sh "${helm} repo add grafana https://grafana.github.io/helm-charts"
+          sh "${helm} repo update"
+          sh "${helm} install grafana grafana/grafana --namespace ${K8S_GRAFANA_NAMESPACE} --set persistence.enabled=false --set adminPassword=admin"
+        }
+      }
+    }
+  }
+}

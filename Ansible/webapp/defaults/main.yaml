@@ -1,0 +1,5 @@
+servername: httpd
+projectsevstate: present
+servicestate: started
+githubcode: https://github.com/Elerqsousy/musical-concert-page/archive/refs/heads/main.zip
+directory: /var/www/html
